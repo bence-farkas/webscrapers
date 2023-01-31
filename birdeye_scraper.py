@@ -64,7 +64,7 @@ class BirdEyeScraper:
         """
         Gather the gems in the tab
         """
-        for i in range(10): #int(self.pages)):
+        for i in range(int(self.pages)):
             soup = BeautifulSoup(self.driver.page_source, 'html.parser')
             trs = soup.find_all("tr")
             for tr in trs:
