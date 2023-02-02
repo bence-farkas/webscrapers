@@ -7,7 +7,7 @@ import argparse
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.options import Options
-from selenium.common.exceptions import WebDriverException, URLError, \
+from selenium.common.exceptions import WebDriverException, \
     UnexpectedAlertPresentException
 from tqdm import tqdm
 # source which helped a lot: https://github.com/mws75/UserName_by_Tag
@@ -36,9 +36,7 @@ class BirdEyeScraper:
             self.driver.get(self.url)
         except WebDriverException as e:
             print(e.__dict__["msg"])
-        except URLError as e:
-            print(e.__dict__["msg"])
-        except:
+        else:
             print("Not handled exception occured!")
         finally:
             time.sleep(500)
