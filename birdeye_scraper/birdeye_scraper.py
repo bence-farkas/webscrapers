@@ -1,8 +1,11 @@
 from bs4 import BeautifulSoup
 import csv
 import time
+import datetime
 from selenium import webdriver
 from selenium.webdriver.common.by import By
+from selenium.webdriver.chrome.options import Options
+from tqdm import tqdm
 # source which helped a lot: https://github.com/mws75/UserName_by_Tag
 
 
@@ -23,7 +26,9 @@ class BirdEyeScraper:
         print("getting page")
         print(self.url)
         try:
-            self.driver = webdriver.Chrome()
+            chrome_options = Options()
+            chrome_options.add_argument("--headless")
+            self.driver = webdriver.Chrome(options=chrome_options)
             self.driver.implicitly_wait(30)
             self.driver.get(self.url)
             print("successfully requested site")
@@ -64,13 +69,17 @@ class BirdEyeScraper:
         """
         Gather the gems in the tab
         """
-        for i in range(int(self.pages)):
+        for _, i in tqdm(enumerate(range(int(self.pages))), total=int(self.pages)):
             soup = BeautifulSoup(self.driver.page_source, 'html.parser')
             trs = soup.find_all("tr")
             for tr in trs:
                 cells = tr.find_all('td')
                 # Extract the text from each cell and store it in a list
                 row_data = [cell.text for cell in cells]
+                if len(row_data) > 0 and '\xa0' not in row_data:
+                    divs = tr.find_all('div')
+                    token_url = "https://birdeye.so" + divs[1].contents[1].contents[0].attrs['href']
+                    row_data.append(token_url)
                 self.raw_data.append(row_data)
             self.btns[self.btn_idx].click()
             self.driver.implicitly_wait(10)
@@ -89,18 +98,55 @@ class BirdEyeScraper:
                 sorted_raw_data.append(coin)
         self.raw_data = sorted_raw_data
 
+    def get_token_holders_ratio(self, coins):
+        """
+
+        :param coins:
+        :return:
+        """
+        updated_coins = []
+        for _, coin in tqdm(enumerate(coins), total=len(coins)):
+            holders_ratio = []
+            potential_coin = True
+            url = coin[-1]
+            self.driver.get(url)
+            self.set_page_data()
+            tbodies = self.page_data.find_all("tbody")
+            if len(tbodies) == 0:
+                continue
+            holder_tbody = tbodies[0]
+            holder_tbody.find_all("tr")
+            trs = holder_tbody.find_all("tr")
+            for tr in trs:
+                cells = tr.find_all('td')
+                row_data = [cell.text for cell in cells]
+                if len(row_data) == 0 or 'No Data' in row_data:
+                    potential_coin = False
+                    break
+                ratio = float(row_data[-1][:-1])
+                holders_ratio.append(ratio)
+                if ratio >= 30:
+                    potential_coin = False
+                    break
+            if potential_coin:
+                coin.append(holders_ratio)
+                #self.write2csv([coin], mode="a", outfile_name="temp.csv")
+                updated_coins.append(coin)
+        return updated_coins
+
 
     def parse_data(self):
         """
         Parse in raw data
         TODO: make it configurable
         """
+        print("Parsing data...")
         potential_coins = []
-        for coin in self.raw_data:
+        for _, coin in tqdm(enumerate(self.raw_data), total=len(self.raw_data)):
             if len(coin) == 0:
                 continue
-            if "$" in coin[-1]:
-                fdmc_str = coin[-1].split("$")[1]
+            if "$" in coin[-2]:
+                fdmc_str = coin[-2].split("$")[1]
                 if len(fdmc_str) == 0:
                     continue
                 multiplier = 1
@@ -113,21 +159,21 @@ class BirdEyeScraper:
                 fdmc = float(fdmc_str[:-1]) * multiplier
                 coin[17] = fdmc
 
-                if fdmc <= 100000:
+                if 1000000 <= fdmc <= 5000000:
                     potential_coins.append(coin)
         potential_coins = sorted(potential_coins, key=lambda row: row[17], reverse=True)
 
         return potential_coins
 
-    def write2csv(self, data):
+    def write2csv(self, data, mode="w", outfile_name="output.csv"):
         """
         :param data:
         :return:
         """
         fields = ["Number", "Token", "Trending", "Price", "30m", "1h",
                   "2h", "24h", "TVL", "24h_vol", "24h", "24h_trades",
-                  "24h_views", "Watchers", "Holders", "Markets", "Total_supply", "FDMC"]
-        with open("output.csv", "w") as file:
+                  "24h_views", "Watchers", "Holders", "Markets", "Total_supply", "FDMC", "TOKEN_URL", "HOLDERS_RATIO"]
+        with open(outfile_name, mode) as file:
             write = csv.writer(file)
             write.writerow(fields)
             write.writerows(data)
@@ -141,16 +187,20 @@ class BirdEyeScraper:
         self.connect()
         if self.driver is None:
             return
+        print(datetime.datetime.now(), "Get page data")
         self.set_page_data()
         # Get page number:
         self.set_page_number()
         # Get next button
         self.set_next_btn()
         # Gather all data from the subpages
+        print(datetime.datetime.now(), "Gather all data from birdeye.so, please wait...")
         self.gather_all_data()
         # parse in data
+        print(datetime.datetime.now(), "Sorting for potential coins, please wait...")
         self.sort_out_the_same_coins()
         potential_coins = self.parse_data()
+        potential_coins = self.get_token_holders_ratio(potential_coins)
         self.write2csv(potential_coins)
 
 
