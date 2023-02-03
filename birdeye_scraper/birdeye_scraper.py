@@ -36,9 +36,6 @@ class BirdEyeScraper:
             self.driver.get(self.url)
         except WebDriverException as e:
             print(e.__dict__["msg"])
-        else:
-            print("Not handled exception occured!")
-        finally:
             time.sleep(500)
             self.driver.quit()
 
