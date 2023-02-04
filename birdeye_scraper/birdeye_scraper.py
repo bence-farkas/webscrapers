@@ -2,15 +2,20 @@ from bs4 import BeautifulSoup
 import csv
 import time
 import datetime
+import yaml
+import argparse
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.options import Options
+from selenium.common.exceptions import WebDriverException, \
+    UnexpectedAlertPresentException
 from tqdm import tqdm
 # source which helped a lot: https://github.com/mws75/UserName_by_Tag
 
 
 class BirdEyeScraper:
-    def __init__(self):
+    def __init__(self, config_path):
+        self.config = self.load_config(config_path)
         self.url = "https://birdeye.so/find-gems"
         self.driver = None
         self.page_data = None
@@ -23,20 +28,18 @@ class BirdEyeScraper:
         """
         Connects to the url via Google Chrome browser
         """
-        print("getting page")
-        print(self.url)
         try:
             chrome_options = Options()
             chrome_options.add_argument("--headless")
             self.driver = webdriver.Chrome(options=chrome_options)
-            self.driver.implicitly_wait(30)
+            self.driver.implicitly_wait(self.config["implicit_wait"])
             self.driver.get(self.url)
-            print("successfully requested site")
-        except:
-            print("Unable to reach site")
-            time.sleep(500)
-            quit()
-            return None
+        except WebDriverException as e:
+            print(e.__dict__["msg"])
+            time.sleep(50)
+            self.driver.quit()
+
+
 
     def set_page_data(self):
         """
@@ -82,7 +85,7 @@ class BirdEyeScraper:
                     row_data.append(token_url)
                 self.raw_data.append(row_data)
             self.btns[self.btn_idx].click()
-            self.driver.implicitly_wait(10)
+            self.driver.implicitly_wait(self.config["implicit_wait"])
 
     def sort_out_the_same_coins(self):
         """
@@ -125,7 +128,7 @@ class BirdEyeScraper:
                     break
                 ratio = float(row_data[-1][:-1])
                 holders_ratio.append(ratio)
-                if ratio >= 30:
+                if ratio >= self.config["max_token_share"]:
                     potential_coin = False
                     break
             if potential_coin:
@@ -159,14 +162,17 @@ class BirdEyeScraper:
                 fdmc = float(fdmc_str[:-1]) * multiplier
                 coin[17] = fdmc
 
-                if 1000000 <= fdmc <= 5000000:
+                if self.config["min_fdmc"] <= fdmc <= self.config["max_fdmc"]:
                     potential_coins.append(coin)
         potential_coins = sorted(potential_coins, key=lambda row: row[17], reverse=True)
 
         return potential_coins
 
-    def write2csv(self, data, mode="w", outfile_name="output.csv"):
+    def write2csv(self, data, mode, outfile_name):
         """
+        :param fields:
+        :param mode:
+        :param outfile_name:
         :param data:
         :return:
         """
@@ -177,32 +183,54 @@ class BirdEyeScraper:
             write = csv.writer(file)
             write.writerow(fields)
             write.writerows(data)
-        print("Data saved!")
+
+    def load_config(self, file_path: str):
+        """
+        Loads yaml configuration file
+        :param file_path: The path of the configuration file
+        :return:
+        """
+        with open(file_path, "r") as stream:
+            try:
+                config = yaml.safe_load(stream)
+            except yaml.YAMLError as exc:
+                print(exc)
+        return config
 
     def find_gems(self):
         """
-
-        :return:
         """
+        print(datetime.datetime.now(), "Connecting to the following site: ", self.url)
         self.connect()
         if self.driver is None:
             return
-        print(datetime.datetime.now(), "Get page data")
+        print(datetime.datetime.now(), "Successfully connected!")
+        print(datetime.datetime.now(), "Getting page data...")
         self.set_page_data()
         # Get page number:
         self.set_page_number()
         # Get next button
         self.set_next_btn()
+        print(datetime.datetime.now(), "Success!")
         # Gather all data from the subpages
-        print(datetime.datetime.now(), "Gather all data from birdeye.so, please wait...")
+        print(datetime.datetime.now(), "Gather all token info, please wait...")
         self.gather_all_data()
+        print(datetime.datetime.now(), "Success!")
         # parse in data
-        print(datetime.datetime.now(), "Sorting for potential coins, please wait...")
+        print(datetime.datetime.now(), "Sorting potential coins, please wait...")
         self.sort_out_the_same_coins()
         potential_coins = self.parse_data()
         potential_coins = self.get_token_holders_ratio(potential_coins)
-        self.write2csv(potential_coins)
+        scraper.driver.quit()
+        print(datetime.datetime.now(), "Success!")
+        print(datetime.datetime.now(), "Saving data to csv...")
+        self.write2csv(potential_coins, mode="w", outfile_name=self.config["output_path"])
+        print(datetime.datetime.now(), "Data saved to:", self.config["output_path"], "Bye!")
 
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--config", default="config.yaml", type=str, help="The configuration path")
+    args = parser.parse_args()
 
-scraper = BirdEyeScraper()
-scraper.find_gems()
+    scraper = BirdEyeScraper(args.config)
+    scraper.find_gems()
