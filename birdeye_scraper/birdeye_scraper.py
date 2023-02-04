@@ -32,11 +32,11 @@ class BirdEyeScraper:
             chrome_options = Options()
             chrome_options.add_argument("--headless")
             self.driver = webdriver.Chrome(options=chrome_options)
-            self.driver.implicitly_wait(30)
+            self.driver.implicitly_wait(self.config["implicit_wait"])
             self.driver.get(self.url)
         except WebDriverException as e:
             print(e.__dict__["msg"])
-            time.sleep(500)
+            time.sleep(50)
             self.driver.quit()
 
 
@@ -85,7 +85,7 @@ class BirdEyeScraper:
                     row_data.append(token_url)
                 self.raw_data.append(row_data)
             self.btns[self.btn_idx].click()
-            self.driver.implicitly_wait(10)
+            self.driver.implicitly_wait(self.config["implicit_wait"])
 
     def sort_out_the_same_coins(self):
         """
@@ -200,7 +200,7 @@ class BirdEyeScraper:
     def find_gems(self):
         """
         """
-        print(datetime.datetime.now(), "Connect to the following site: ", self.url)
+        print(datetime.datetime.now(), "Connecting to the following site: ", self.url)
         self.connect()
         if self.driver is None:
             return
@@ -225,7 +225,7 @@ class BirdEyeScraper:
         print(datetime.datetime.now(), "Success!")
         print(datetime.datetime.now(), "Saving data to csv...")
         self.write2csv(potential_coins, mode="w", outfile_name=self.config["output_path"])
-        print(datetime.datetime.now(), "Data saved to: ", self.config["output_path"], "Bye!")
+        print(datetime.datetime.now(), "Data saved to:", self.config["output_path"], "Bye!")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
