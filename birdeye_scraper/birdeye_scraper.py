@@ -62,7 +62,7 @@ class BirdEyeScraper:
         """
         Sets the next button which we need when we want to go through the tab
         """
-        self.btns = self.driver.find_elements(By.CLASS_NAME, "ant-btn.ant-btn-default.sc-dGXBhE.doBqGu")
+        self.btns = self.driver.find_elements(By.TAG_NAME, "button")
         self.btn_idx = -1
         for i, btn in enumerate(self.btns):
             if btn.accessible_name == "right":
@@ -126,7 +126,7 @@ class BirdEyeScraper:
                 if len(row_data) == 0 or 'No Data' in row_data:
                     potential_coin = False
                     break
-                ratio = float(row_data[-1][:-1])
+                ratio = float(row_data[-1][:-1].replace(',',''))
                 holders_ratio.append(ratio)
                 if ratio >= self.config["max_token_share"]:
                     potential_coin = False
