@@ -7,8 +7,9 @@ import argparse
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.options import Options
-from selenium.common.exceptions import WebDriverException, \
-    UnexpectedAlertPresentException
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.common.exceptions import WebDriverException, TimeoutException
 from tqdm import tqdm
 # source which helped a lot: https://github.com/mws75/UserName_by_Tag
 
@@ -36,10 +37,7 @@ class BirdEyeScraper:
             self.driver.get(self.url)
         except WebDriverException as e:
             print(e.__dict__["msg"])
-            time.sleep(50)
             self.driver.quit()
-
-
 
     def set_page_data(self):
         """
@@ -49,30 +47,31 @@ class BirdEyeScraper:
 
     def set_page_number(self):
         """
-        Sets the tab page number which will needed when we go through in it
+        Sets the tab page number which will be needed when we go through it
         """
-        spans = self.page_data.find_all("span")
-        self.pages = -1
-        for span in spans:
-            if any("Page" in s for s in span.contents):
-                self.pages = span.contents[0].split(" ")[-1]
-                break
+        wait = WebDriverWait(self.driver, self.config["explicit_wait"])
+        try:
+            span_element = wait.until(EC.presence_of_element_located((By.XPATH, "//span[contains(., 'Page')]")))
+            self.pages = int(span_element.text.split(" ")[-1])
+        except TimeoutException:
+            print("Timeout waiting for the page number span element to load")
+            self.pages = -1
 
     def set_next_btn(self):
         """
         Sets the next button which we need when we want to go through the tab
         """
         self.btns = self.driver.find_elements(By.TAG_NAME, "button")
-        self.btn_idx = -1
         for i, btn in enumerate(self.btns):
             if btn.accessible_name == "right":
                 self.btn_idx = i
+                break
 
     def gather_all_data(self):
         """
         Gather the gems in the tab
         """
-        for _, i in tqdm(enumerate(range(int(self.pages))), total=int(self.pages)):
+        for _, i in tqdm(enumerate(range(self.pages)), total=self.pages):
             soup = BeautifulSoup(self.driver.page_source, 'html.parser')
             trs = soup.find_all("tr")
             for tr in trs:
@@ -123,7 +122,7 @@ class BirdEyeScraper:
             for tr in trs:
                 cells = tr.find_all('td')
                 row_data = [cell.text for cell in cells]
-                if len(row_data) == 0 or 'No Data' in row_data:
+                if len(row_data) == 0 or 'No dat' in row_data:
                     potential_coin = False
                     break
                 ratio = float(row_data[-1][:-1].replace(',',''))
@@ -136,7 +135,6 @@ class BirdEyeScraper:
                 #self.write2csv([coin], mode="a", outfile_name="temp.csv")
                 updated_coins.append(coin)
         return updated_coins
-
 
     def parse_data(self):
         """
@@ -226,6 +224,7 @@ class BirdEyeScraper:
         print(datetime.datetime.now(), "Saving data to csv...")
         self.write2csv(potential_coins, mode="w", outfile_name=self.config["output_path"])
         print(datetime.datetime.now(), "Data saved to:", self.config["output_path"], "Bye!")
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
