@@ -1,6 +1,7 @@
 min_fdmc: 0 # Minimum USD of the token fully diluted market cap
-max_fdmc: 10000000 # Maximum USD of the token fully diluted market cap
+max_fdmc: 100000000 # Maximum USD of the token fully diluted market cap
 max_token_share: 30 # Maximum share percentage of the total supply which an address can hold
 output_path: "output.csv" # The output .csv file
 implicit_wait: 10 # ms wait time between page requests
-explicit_wait: 10
+explicit_wait: 10 # ms wait time to load page
+chain: "solana" # allChain, solana, ethereum, bsc, arbitrum, polygon, avalanche

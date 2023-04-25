@@ -1,9 +1,8 @@
-from bs4 import BeautifulSoup
 import csv
-import time
 import datetime
 import yaml
 import argparse
+from bs4 import BeautifulSoup
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.options import Options
@@ -17,7 +16,8 @@ from tqdm import tqdm
 class BirdEyeScraper:
     def __init__(self, config_path):
         self.config = self.load_config(config_path)
-        self.url = "https://birdeye.so/find-gems"
+        self.chain = self.config["chain"]
+        self.url = f"https://birdeye.so/find-gems?chain={self.chain}"
         self.driver = None
         self.page_data = None
         self.pages = -1
@@ -52,7 +52,7 @@ class BirdEyeScraper:
         wait = WebDriverWait(self.driver, self.config["explicit_wait"])
         try:
             span_element = wait.until(EC.presence_of_element_located((By.XPATH, "//span[contains(., 'Page')]")))
-            self.pages = int(span_element.text.split(" ")[-1])
+            self.pages = int(span_element.text.split(" ")[-1].replace(',', ''))
         except TimeoutException:
             print("Timeout waiting for the page number span element to load")
             self.pages = -1
@@ -77,12 +77,12 @@ class BirdEyeScraper:
             for tr in trs:
                 cells = tr.find_all('td')
                 # Extract the text from each cell and store it in a list
-                row_data = [cell.text for cell in cells]
+                row_data = [cell.text for i, cell in enumerate(cells) if i != 2]
                 if len(row_data) > 0 and '\xa0' not in row_data:
                     divs = tr.find_all('div')
                     token_url = "https://birdeye.so" + divs[1].contents[1].contents[0].attrs['href']
                     row_data.append(token_url)
-                self.raw_data.append(row_data)
+                    self.raw_data.append(row_data)
             self.btns[self.btn_idx].click()
             self.driver.implicitly_wait(self.config["implicit_wait"])
 
@@ -90,13 +90,12 @@ class BirdEyeScraper:
         """
         Some coins exist multiple times which we want to sort out
         """
-        coin_names = []
+        coin_names = set()
         sorted_raw_data = []
+
         for coin in self.raw_data:
-            if len(coin) == 0:
-                continue
-            if coin[1] not in coin_names:
-                coin_names.append(coin[1])
+            if len(coin) > 0 and '\xa0' not in coin and coin[-1] not in coin_names:
+                coin_names.add(coin[-1])
                 sorted_raw_data.append(coin)
         self.raw_data = sorted_raw_data
 
@@ -122,17 +121,16 @@ class BirdEyeScraper:
             for tr in trs:
                 cells = tr.find_all('td')
                 row_data = [cell.text for cell in cells]
-                if len(row_data) == 0 or 'No dat' in row_data:
+                if len(row_data) == 0 or 'No dat' in row_data[-1][:-1]:
                     potential_coin = False
                     break
-                ratio = float(row_data[-1][:-1].replace(',',''))
+                ratio = float(row_data[-1][:-1].replace(',', ''))
                 holders_ratio.append(ratio)
                 if ratio >= self.config["max_token_share"]:
                     potential_coin = False
                     break
             if potential_coin:
                 coin.append(holders_ratio)
-                #self.write2csv([coin], mode="a", outfile_name="temp.csv")
                 updated_coins.append(coin)
         return updated_coins
 
@@ -141,28 +139,26 @@ class BirdEyeScraper:
         Parse in raw data
         TODO: make it configurable
         """
-        print("Parsing data...")
-        potential_coins = []
-        for _, coin in tqdm(enumerate(self.raw_data), total=len(self.raw_data)):
-            if len(coin) == 0:
-                continue
-            if "$" in coin[-2]:
-                fdmc_str = coin[-2].split("$")[1]
-                if len(fdmc_str) == 0:
-                    continue
-                multiplier = 1
-                if "M" in fdmc_str:
-                    multiplier = 1000000
-                elif "B" in fdmc_str:
-                    multiplier = 1000000000
-                elif "K" in fdmc_str:
-                    multiplier = 1000
-                fdmc = float(fdmc_str[:-1]) * multiplier
-                coin[17] = fdmc
+        print(datetime.datetime.now(), "Parsing data...")
 
-                if self.config["min_fdmc"] <= fdmc <= self.config["max_fdmc"]:
-                    potential_coins.append(coin)
-        potential_coins = sorted(potential_coins, key=lambda row: row[17], reverse=True)
+        def parse_fdmc(fdmc_str):
+            if len(fdmc_str) == 0:
+                return None
+            multiplier = 1
+            if "M" in fdmc_str:
+                multiplier = 1000000
+            elif "B" in fdmc_str:
+                multiplier = 1000000000
+            elif "K" in fdmc_str:
+                multiplier = 1000
+            return float(fdmc_str[:-1]) * multiplier
+
+        potential_coins = [coin[0:17] + [parse_fdmc(coin[-2].split("$")[1])] + coin[18:] for coin in self.raw_data if
+                            len(coin) > 0 and "$" in coin[-2] and self.config["min_fdmc"] <=
+                            parse_fdmc(coin[-2].split("$")[1]) <= self.config["max_fdmc"]]
+
+        if len(potential_coins) > 0:
+            potential_coins = sorted(potential_coins, key=lambda row: row[17], reverse=True)
 
         return potential_coins
 
@@ -201,12 +197,16 @@ class BirdEyeScraper:
         print(datetime.datetime.now(), "Connecting to the following site: ", self.url)
         self.connect()
         if self.driver is None:
+            print(datetime.datetime.now(), "Failed to load webpage! Exiting now.")
             return
         print(datetime.datetime.now(), "Successfully connected!")
         print(datetime.datetime.now(), "Getting page data...")
         self.set_page_data()
         # Get page number:
         self.set_page_number()
+        if self.pages == -1:
+            print(datetime.datetime.now(), "Failed to load webpage! Exiting now.")
+            return
         # Get next button
         self.set_next_btn()
         print(datetime.datetime.now(), "Success!")
@@ -219,7 +219,8 @@ class BirdEyeScraper:
         self.sort_out_the_same_coins()
         potential_coins = self.parse_data()
         potential_coins = self.get_token_holders_ratio(potential_coins)
-        scraper.driver.quit()
+        self.driver.close()
+        self.driver.quit()
         print(datetime.datetime.now(), "Success!")
         print(datetime.datetime.now(), "Saving data to csv...")
         self.write2csv(potential_coins, mode="w", outfile_name=self.config["output_path"])
