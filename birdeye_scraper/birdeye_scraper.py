@@ -24,6 +24,7 @@ class BirdEyeScraper:
         self.btn_idx = -1
         self.btns = None
         self.raw_data = []
+        self.wait = None
 
     def connect(self):
         """
@@ -33,10 +34,14 @@ class BirdEyeScraper:
             chrome_options = Options()
             chrome_options.add_argument("--headless")
             self.driver = webdriver.Chrome(options=chrome_options)
-            self.driver.implicitly_wait(self.config["implicit_wait"])
             self.driver.get(self.url)
+            self.wait = WebDriverWait(self.driver, self.config["explicit_wait"])
+            self.wait.until(EC.presence_of_element_located((By.XPATH, "//span[contains(., 'Page')]")))
         except WebDriverException as e:
-            print(e.__dict__["msg"])
+            print(e.__dict__.get("msg", "An unknown WebDriverException occurred"))
+            self.driver.quit()
+        except TimeoutException:
+            print("Timed out waiting for the page to load.")
             self.driver.quit()
 
     def set_page_data(self):
@@ -49,9 +54,8 @@ class BirdEyeScraper:
         """
         Sets the tab page number which will be needed when we go through it
         """
-        wait = WebDriverWait(self.driver, self.config["explicit_wait"])
         try:
-            span_element = wait.until(EC.presence_of_element_located((By.XPATH, "//span[contains(., 'Page')]")))
+            span_element = self.wait.until(EC.presence_of_element_located((By.XPATH, "//span[contains(., 'Page')]")))
             self.pages = int(span_element.text.split(" ")[-1].replace(',', ''))
         except TimeoutException:
             print("Timeout waiting for the page number span element to load")
@@ -71,20 +75,23 @@ class BirdEyeScraper:
         """
         Gather the gems in the tab
         """
-        for _, i in tqdm(enumerate(range(self.pages)), total=self.pages):
-            soup = BeautifulSoup(self.driver.page_source, 'html.parser')
-            trs = soup.find_all("tr")
-            for tr in trs:
-                cells = tr.find_all('td')
-                # Extract the text from each cell and store it in a list
-                row_data = [cell.text for i, cell in enumerate(cells) if i != 2]
-                if len(row_data) > 0 and '\xa0' not in row_data:
-                    divs = tr.find_all('div')
-                    token_url = "https://birdeye.so" + divs[1].contents[1].contents[0].attrs['href']
-                    row_data.append(token_url)
-                    self.raw_data.append(row_data)
-            self.btns[self.btn_idx].click()
-            self.driver.implicitly_wait(self.config["implicit_wait"])
+        try:
+            for _, i in tqdm(enumerate(range(self.pages)), total=self.pages):
+                WebDriverWait(self.driver, 10).until(EC.presence_of_element_located((By.TAG_NAME, 'tr')))
+                soup = BeautifulSoup(self.driver.page_source, 'html.parser')
+                trs = soup.find_all("tr")
+                for tr in trs:
+                    WebDriverWait(self.driver, 10).until(EC.presence_of_all_elements_located((By.TAG_NAME, 'td')))
+                    cells = tr.find_all('td')
+                    row_data = [cell.text for i, cell in enumerate(cells) if i != 2]
+                    if len(row_data) > 0 and '\xa0' not in row_data:
+                        divs = tr.find_all('div')
+                        token_url = "https://birdeye.so" + divs[1].contents[1].contents[0].attrs['href']
+                        row_data.append(token_url)
+                        self.raw_data.append(row_data)
+                self.btns[self.btn_idx].click()
+        except TimeoutException:
+            print("Timed out waiting for elements to load.")
 
     def sort_out_the_same_coins(self):
         """
@@ -134,31 +141,53 @@ class BirdEyeScraper:
                 updated_coins.append(coin)
         return updated_coins
 
+    def parse_fdmc(self, fdmc_str):
+        """
+        Parse the FDMC string and return its numerical value
+        """
+        if len(fdmc_str) == 0:
+            return None
+
+        multiplier = 1
+        if "M" in fdmc_str:
+            multiplier = 1_000_000
+        elif "B" in fdmc_str:
+            multiplier = 1_000_000_000
+        elif "K" in fdmc_str:
+            multiplier = 1_000
+
+        return float(fdmc_str[:-1]) * multiplier
+
     def parse_data(self):
         """
         Parse in raw data
         TODO: make it configurable
         """
         print(datetime.datetime.now(), "Parsing data...")
+        min_fdmc = self.config["min_fdmc"]
+        max_fdmc = self.config["max_fdmc"]
 
-        def parse_fdmc(fdmc_str):
-            if len(fdmc_str) == 0:
-                return None
-            multiplier = 1
-            if "M" in fdmc_str:
-                multiplier = 1000000
-            elif "B" in fdmc_str:
-                multiplier = 1000000000
-            elif "K" in fdmc_str:
-                multiplier = 1000
-            return float(fdmc_str[:-1]) * multiplier
+        potential_coins = []
+        for coin in self.raw_data:
+            # Skip empty coins
+            if not coin:
+                continue
+            fdmc_str = coin[-2]
 
-        potential_coins = [coin[0:17] + [parse_fdmc(coin[-2].split("$")[1])] + coin[18:] for coin in self.raw_data if
-                            len(coin) > 0 and "$" in coin[-2] and self.config["min_fdmc"] <=
-                            parse_fdmc(coin[-2].split("$")[1]) <= self.config["max_fdmc"]]
+            # Skip coins without a dollar sign in their FDMC string
+            if '$' not in fdmc_str:
+                continue
 
-        if len(potential_coins) > 0:
-            potential_coins = sorted(potential_coins, key=lambda row: row[17], reverse=True)
+            # Extract the numerical part of the FDMC string (everything after the dollar sign)
+            fdmc_value = self.parse_fdmc(fdmc_str[fdmc_str.index('$') + 1:])
+
+            if min_fdmc <= fdmc_value <= max_fdmc:
+                new_coin = coin[0:17] + [fdmc_value] + coin[18:]
+                potential_coins.append(new_coin)
+
+        # Sort the coins based on the FDMC value
+        if potential_coins:
+            potential_coins.sort(key=lambda row: row[17], reverse=True)
 
         return potential_coins
 
